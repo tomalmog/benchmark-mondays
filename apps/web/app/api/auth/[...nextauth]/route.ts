@@ -7,6 +7,11 @@ const handler = NextAuth({
     GithubProvider({
       clientId: process.env.GITHUB_CLIENT_ID!,
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
+      authorization: {
+        params: {
+          redirect_uri: "https://www.tomalmog.com/bmm/api/auth/callback/github",
+        },
+      },
     }),
   ],
   callbacks: {
