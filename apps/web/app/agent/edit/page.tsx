@@ -19,13 +19,13 @@ export default function EditAgentPage() {
 
   useEffect(() => {
     if (authStatus !== "authenticated") { setLoading(false); return; }
-    fetch("/api/my-agent")
+    fetch("/bmm/api/my-agent")
       .then(async (res) => {
         if (!res.ok) { setLoading(false); return; }
         const data = await res.json();
         setAgentId(data.id);
         // Fetch the full config
-        const configRes = await fetch(`/api/agents/${data.id}/config`);
+        const configRes = await fetch(`/bmm/api/agents/${data.id}/config`);
         if (configRes.ok) {
           const config = await configRes.json();
           setSystemPrompt(config.systemPrompt || "");
@@ -45,7 +45,7 @@ export default function EditAgentPage() {
     setMessage("");
 
     try {
-      const res = await fetch("/api/agents/update", {
+      const res = await fetch("/bmm/api/agents/update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

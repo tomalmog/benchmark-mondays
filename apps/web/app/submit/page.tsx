@@ -19,7 +19,7 @@ export default function SubmitPage() {
     setMessage("");
 
     try {
-      const res = await fetch("/api/agents/submit", {
+      const res = await fetch("/bmm/api/agents/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

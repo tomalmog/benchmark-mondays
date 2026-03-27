@@ -51,7 +51,7 @@ export default function Home() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetch("/api/competition");
+        const res = await fetch("/bmm/api/competition");
         const json = await res.json();
         setData(json);
       } catch {
@@ -67,7 +67,7 @@ export default function Home() {
 
   useEffect(() => {
     if (authStatus !== "authenticated") { setHasAgent(false); setCheckedAgent(false); return; }
-    fetch("/api/my-agent").then((res) => { setHasAgent(res.ok); setCheckedAgent(true); }).catch(() => setCheckedAgent(true));
+    fetch("/bmm/api/my-agent").then((res) => { setHasAgent(res.ok); setCheckedAgent(true); }).catch(() => setCheckedAgent(true));
   }, [authStatus]);
 
   if (loading) {

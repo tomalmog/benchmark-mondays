@@ -15,7 +15,7 @@ export default function MyAgentPage() {
   useEffect(() => {
     if (status !== "authenticated") { setLoading(false); return; }
 
-    fetch("/api/my-agent")
+    fetch("/bmm/api/my-agent")
       .then(async (res) => {
         if (res.ok) {
           const data = await res.json();

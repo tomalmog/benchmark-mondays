@@ -11,7 +11,7 @@ export default function NavBar() {
 
   useEffect(() => {
     if (status !== "authenticated") { setCheckedAgent(false); return; }
-    fetch("/api/my-agent")
+    fetch("/bmm/api/my-agent")
       .then((res) => { setHasAgent(res.ok); setCheckedAgent(true); })
       .catch(() => setCheckedAgent(true));
   }, [status]);
