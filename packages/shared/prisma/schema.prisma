@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(uuid()) @db.Uuid
+  githubId    String   @unique @map("github_id")
+  githubLogin String   @map("github_login")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  agents      Agent[]
+
+  @@map("users")
+}
+
+model Competition {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  arenaType    String   @map("arena_type")
+  seed         String
+  status       String   @default("draft") // draft | active | paused | completed
+  startsAt     DateTime @map("starts_at") @db.Timestamptz()
+  endsAt       DateTime @map("ends_at") @db.Timestamptz()
+  currentRound Int      @default(0) @map("current_round")
+  maxAgents    Int      @default(50) @map("max_agents")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  agents       Agent[]
+  portfolios   Portfolio[]
+  rounds       Round[]
+  actions      Action[]
+
+  @@map("competitions")
+}
+
+model Agent {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  competitionId   String   @map("competition_id") @db.Uuid
+  name            String
+  config          Json     @db.JsonB  // { systemPrompt, examples, temperature, topP, maxTokens, repetitionPenalty }
+  status          String   @default("active") // active | inactive
+  totalInferences Int      @default(0) @map("total_inferences")
+  lastError       String?  @map("last_error")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  user            User     @relation(fields: [userId], references: [id])
+  competition     Competition @relation(fields: [competitionId], references: [id])
+  portfolios      Portfolio[]
+  actions         Action[]
+
+  @@unique([userId, competitionId])
+  @@map("agents")
+}
+
+model Portfolio {
+  id            String   @id @default(uuid()) @db.Uuid
+  agentId       String   @map("agent_id") @db.Uuid
+  competitionId String   @map("competition_id") @db.Uuid
+  cash          Decimal  @default(100000.00) @db.Decimal(15, 2)
+  holdings      Json     @default("{}") @db.JsonB
+  totalValue    Decimal  @default(100000.00) @map("total_value") @db.Decimal(15, 2)
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz()
+  agent         Agent    @relation(fields: [agentId], references: [id])
+  competition   Competition @relation(fields: [competitionId], references: [id])
+
+  @@unique([agentId, competitionId])
+  @@index([competitionId, totalValue(sort: Desc)], map: "idx_portfolios_competition_value")
+  @@map("portfolios")
+}
+
+model Round {
+  id            String    @id @default(uuid()) @db.Uuid
+  competitionId String    @map("competition_id") @db.Uuid
+  roundNumber   Int       @map("round_number")
+  status        String    @default("pending") // pending | executing | committed
+  marketState   Json?     @map("market_state") @db.JsonB
+  startedAt     DateTime? @map("started_at") @db.Timestamptz()
+  committedAt   DateTime? @map("committed_at") @db.Timestamptz()
+  competition   Competition @relation(fields: [competitionId], references: [id])
+  actions       Action[]
+
+  @@unique([competitionId, roundNumber])
+  @@index([competitionId, roundNumber], map: "idx_rounds_competition_number")
+  @@map("rounds")
+}
+
+model Action {
+  id              String   @id @default(uuid()) @db.Uuid
+  agentId         String   @map("agent_id") @db.Uuid
+  roundId         String   @map("round_id") @db.Uuid
+  competitionId   String   @map("competition_id") @db.Uuid
+  actionType      String   @map("action_type") // buy | sell | hold | error | timeout
+  ticker          String?
+  quantity        Int?
+  price           Decimal? @db.Decimal(10, 2)
+  transactionCost Decimal? @map("transaction_cost") @db.Decimal(10, 2)
+  rejected        Boolean  @default(false)
+  rejectionReason String?  @map("rejection_reason")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz()
+  agent           Agent    @relation(fields: [agentId], references: [id])
+  round           Round    @relation(fields: [roundId], references: [id])
+  competition     Competition @relation(fields: [competitionId], references: [id])
+
+  @@index([competitionId, createdAt(sort: Desc)], map: "idx_actions_competition_created")
+  @@index([agentId, createdAt(sort: Desc)], map: "idx_actions_agent_created")
+  @@map("actions")
+}
