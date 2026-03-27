@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   basePath: "/bmm",
   skipTrailingSlashRedirect: true,
   transpilePackages: ["@weekly-benchmark/shared"],
+  env: {
+    NEXTAUTH_URL: process.env.NEXTAUTH_URL,
+  },
 };
 
 export default nextConfig;
