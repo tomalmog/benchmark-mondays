@@ -51,7 +51,7 @@ export default function NavBar() {
           </div>
         ) : (
           <button
-            onClick={() => signIn("github", { callbackUrl: "/" })}
+            onClick={() => signIn("github", { callbackUrl: "/bmm" })}
             className="bg-gray-900 text-white px-3 py-1 text-xs font-semibold"
           >
             Sign in with GitHub
