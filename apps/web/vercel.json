@@ -1,0 +1,4 @@
+{
+  "installCommand": "cd ../.. && npm install --ignore-scripts",
+  "buildCommand": "cd ../../packages/shared && npx tsc && npx prisma generate && cd ../../apps/web && npx next build"
+}
