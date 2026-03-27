@@ -10,6 +10,9 @@ export async function GET() {
   });
 
   if (!competition) {
+    // Debug: log what we see
+    const allComps = await prisma.competition.findMany();
+    console.log("[api/competition] No active competition found. Total competitions:", allComps.length, allComps.map(c => ({ id: c.id, status: c.status, name: c.name })));
     return NextResponse.json(null);
   }
 
