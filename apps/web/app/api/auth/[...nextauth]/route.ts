@@ -2,6 +2,8 @@ import NextAuth from "next-auth";
 import GithubProvider from "next-auth/providers/github";
 import { prisma } from "@/lib/db";
 
+const CALLBACK_URL = "https://www.tomalmog.com/bmm/api/auth/callback/github";
+
 const handler = NextAuth({
   providers: [
     GithubProvider({
@@ -9,7 +11,13 @@ const handler = NextAuth({
       clientSecret: process.env.GITHUB_CLIENT_SECRET!,
       authorization: {
         params: {
-          redirect_uri: "https://www.tomalmog.com/bmm/api/auth/callback/github",
+          redirect_uri: CALLBACK_URL,
+        },
+      },
+      token: {
+        url: "https://github.com/login/oauth/access_token",
+        params: {
+          redirect_uri: CALLBACK_URL,
         },
       },
     }),
@@ -17,45 +25,33 @@ const handler = NextAuth({
   callbacks: {
     async signIn({ profile }) {
       try {
-        if (!profile) return true; // let it through, handle in session callback
+        if (!profile) return true;
 
         const githubId = String((profile as { id?: number }).id || "");
         const githubLogin = (profile as { login?: string }).login || "unknown";
 
         if (!githubId) return true;
 
-        // Try to find existing user first
-        const existing = await prisma.user.findFirst({
-          where: { githubId },
-        });
+        const existing = await prisma.user.findFirst({ where: { githubId } });
 
         if (existing) {
-          // Update login if changed
           if (existing.githubLogin !== githubLogin) {
-            await prisma.user.update({
-              where: { id: existing.id },
-              data: { githubLogin },
-            });
+            await prisma.user.update({ where: { id: existing.id }, data: { githubLogin } });
           }
         } else {
-          // Create new user
-          await prisma.user.create({
-            data: { githubId, githubLogin },
-          });
+          await prisma.user.create({ data: { githubId, githubLogin } });
         }
 
         return true;
       } catch (err) {
         console.error("[auth] signIn error:", err);
-        return true; // still allow sign in even if DB fails
+        return true;
       }
     },
 
     async session({ session, token }) {
       if (token.sub && session.user) {
-        const user = await prisma.user.findFirst({
-          where: { githubId: token.sub },
-        });
+        const user = await prisma.user.findFirst({ where: { githubId: token.sub } });
         if (user) {
           (session.user as { id?: string }).id = user.id;
           (session.user as { githubLogin?: string }).githubLogin = user.githubLogin;
@@ -72,8 +68,8 @@ const handler = NextAuth({
     },
   },
   pages: {
-    signIn: "/", // skip NextAuth's built-in sign-in page
-    error: "/",  // redirect errors to home
+    signIn: "/bmm",
+    error: "/bmm",
   },
 });
 
