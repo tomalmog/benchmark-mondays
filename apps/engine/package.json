@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@weekly-benchmark/arena-stock-exchange": "*",
-    "@weekly-benchmark/shared": "*",
+    "@weekly-benchmark/shared": "*"
+  },
+  "optionalDependencies": {
     "node-llama-cpp": "^3.18.1"
   },
   "devDependencies": {
