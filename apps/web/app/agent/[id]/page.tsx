@@ -47,7 +47,7 @@ export default async function AgentDetailPage({ params }: PageProps) {
     where: { agentId: id, rejected: false },
     _count: true,
   });
-  const countMap = Object.fromEntries(actionCounts.map((a) => [a.actionType, a._count]));
+  const countMap: Record<string, number> = Object.fromEntries(actionCounts.map((a: { actionType: string; _count: number }) => [a.actionType, a._count]));
 
   // Recent actions
   const actions = await prisma.action.findMany({
