@@ -1,7 +1,7 @@
-import { prisma } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { getServerSession } from "next-auth";
 import Link from "next/link";
+import { fetchEngine } from "@/lib/engine";
 
 export const dynamic = "force-dynamic";
 
@@ -9,52 +9,54 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
+interface AgentAction {
+  id: string;
+  actionType: string;
+  ticker?: string | null;
+  quantity?: number | null;
+  price?: number | null;
+  rejected?: boolean;
+  rejectionReason?: string | null;
+  createdAt: string;
+}
+
+interface AgentDetail {
+  id: string;
+  name: string;
+  githubLogin: string;
+  arenaType: string;
+  totalValue: number;
+  cash: number;
+  pnl: number;
+  holdings: Record<string, number>;
+  totalInferences: number;
+  isPoker: boolean;
+  countMap: Record<string, number>;
+  actions: AgentAction[];
+}
+
 export default async function AgentDetailPage({ params }: PageProps) {
   const { id } = await params;
+  const response = await fetchEngine(`/api/agents/${id}`, { cache: "no-store" });
 
-  const agent = await prisma.agent.findUnique({
-    where: { id },
-    include: {
-      user: true,
-      portfolios: { take: 1 },
-      competition: true,
-    },
-  });
-
-  if (!agent) notFound();
-
-  const isPoker = agent.competition.arenaType === "poker";
-  const portfolio = agent.portfolios[0];
-  const totalValue = portfolio ? Number(portfolio.totalValue) : 100000;
-  const cash = portfolio ? Number(portfolio.cash) : 100000;
-  const pnl = totalValue - 100000;
-
-  // Check ownership
-  const session = await getServerSession();
-  const userName = session?.user?.name;
-  const userEmail = session?.user?.email;
-  let isOwner = false;
-  if (userName || userEmail) {
-    const currentUser = await prisma.user.findFirst({
-      where: { OR: [...(userEmail ? [{ githubLogin: userEmail }] : []), ...(userName ? [{ githubLogin: userName }] : [])] },
-    });
-    isOwner = currentUser?.id === agent.userId;
+  if (!response.ok) {
+    notFound();
   }
 
-  // Action counts
-  const actionCounts = await prisma.action.groupBy({
-    by: ["actionType"],
-    where: { agentId: id, rejected: false },
-    _count: true,
-  });
-  const countMap: Record<string, number> = Object.fromEntries(actionCounts.map((a: { actionType: string; _count: number }) => [a.actionType, a._count]));
+  const agent = (await response.json()) as AgentDetail;
+  const totalValue = Number(agent.totalValue ?? 100000);
+  const cash = Number(agent.cash ?? 100000);
+  const pnl = totalValue - 100000;
+  const countMap = agent.countMap || {};
+  const actions = Array.isArray(agent.actions) ? agent.actions : [];
+  const holdings = agent.holdings || {};
 
-  // Recent actions
-  const actions = await prisma.action.findMany({
-    where: { agentId: id },
-    orderBy: { createdAt: "desc" },
-    take: 50,
-  });
+  const session = await getServerSession();
+  const sessionLogin =
+    (session?.user as { githubLogin?: string } | undefined)?.githubLogin ||
+    session?.user?.name ||
+    session?.user?.email;
+  const isOwner = !!sessionLogin && sessionLogin === agent.githubLogin;
 
   return (
     <main className="max-w-4xl mx-auto p-6">
@@ -67,7 +69,7 @@ export default async function AgentDetailPage({ params }: PageProps) {
           <h1 className="text-xl font-bold">
             {agent.name}{" "}
             <span className="font-normal text-sm text-gray-400">
-              by @{agent.user.githubLogin}
+              by @{agent.githubLogin}
             </span>
           </h1>
           {isOwner && (
@@ -77,7 +79,7 @@ export default async function AgentDetailPage({ params }: PageProps) {
           )}
         </div>
 
-        {isPoker ? (
+        {agent.isPoker ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
             <div className="border border-gray-100 p-3 text-center">
               <div className="text-xl font-bold">
@@ -92,11 +94,11 @@ export default async function AgentDetailPage({ params }: PageProps) {
               <div className="text-xs text-gray-400 uppercase mt-1">P&L</div>
             </div>
             <div className="border border-gray-100 p-3 text-center">
-              <div className="text-xl font-bold">{countMap["raise"] || 0}</div>
+              <div className="text-xl font-bold">{countMap.raise || 0}</div>
               <div className="text-xs text-gray-400 uppercase mt-1">Raises</div>
             </div>
             <div className="border border-gray-100 p-3 text-center">
-              <div className="text-xl font-bold">{countMap["fold"] || 0}</div>
+              <div className="text-xl font-bold">{countMap.fold || 0}</div>
               <div className="text-xs text-gray-400 uppercase mt-1">Folds</div>
             </div>
           </div>
@@ -106,10 +108,10 @@ export default async function AgentDetailPage({ params }: PageProps) {
               <div className={`text-xl font-bold ${pnl >= 0 ? "text-green-600" : "text-red-600"}`}>
                 {pnl >= 0 ? "+" : ""}${pnl.toLocaleString("en-US", { maximumFractionDigits: 0 })}
               </div>
-              <div className="text-xs text-gray-400 uppercase mt-1">Total P&L</div>
+              <div className="text-xs text-gray-400 uppercase mt-1">Total P&amp;L</div>
             </div>
             <div className="border border-gray-100 p-3 text-center">
-              <div className="text-xl font-bold">{(countMap["buy"] || 0) + (countMap["sell"] || 0)}</div>
+              <div className="text-xl font-bold">{(countMap.buy || 0) + (countMap.sell || 0)}</div>
               <div className="text-xs text-gray-400 uppercase mt-1">Total Trades</div>
             </div>
             <div className="border border-gray-100 p-3 text-center">
@@ -127,12 +129,11 @@ export default async function AgentDetailPage({ params }: PageProps) {
           </div>
         )}
 
-        {/* Holdings (stock exchange only) */}
-        {!isPoker && portfolio && Object.keys((portfolio.holdings as Record<string, number>) || {}).length > 0 && (
+        {!agent.isPoker && Object.keys(holdings).length > 0 && (
           <div className="mt-4 border-t border-gray-100 pt-3">
             <div className="text-xs font-bold uppercase text-gray-400 mb-2">Holdings</div>
             <div className="flex flex-wrap gap-2">
-              {Object.entries(portfolio.holdings as Record<string, number>).map(([ticker, qty]) => (
+              {Object.entries(holdings).map(([ticker, qty]) => (
                 <span key={ticker} className="bg-gray-50 border border-gray-200 px-2 py-1 text-xs">
                   {ticker}: {qty}
                 </span>
@@ -144,7 +145,7 @@ export default async function AgentDetailPage({ params }: PageProps) {
 
       <div className="border border-gray-200 bg-white" style={{ maxHeight: "500px" }}>
         <div className="px-4 py-3 text-xs font-bold uppercase tracking-wider border-b border-gray-100">
-          {isPoker ? "Action Log" : "Trade Log"}
+          {agent.isPoker ? "Action Log" : "Trade Log"}
         </div>
         <div className="overflow-y-auto" style={{ maxHeight: "450px" }}>
           {actions.length === 0 ? (
@@ -156,7 +157,7 @@ export default async function AgentDetailPage({ params }: PageProps) {
               {actions.map((action) => (
                 <div key={action.id} className="px-4 py-2 border-b border-gray-50 flex justify-between">
                   <span>
-                    {isPoker ? (
+                    {agent.isPoker ? (
                       <>
                         <span className={
                           action.actionType === "raise" ? "text-green-600" :
@@ -167,7 +168,7 @@ export default async function AgentDetailPage({ params }: PageProps) {
                           {action.actionType.toUpperCase()}
                         </span>
                         {action.price && action.actionType === "raise" && <> ${Number(action.price).toFixed(0)}</>}
-                        {action.rejectionReason && <span className="text-gray-400"> — {action.rejectionReason}</span>}
+                        {action.rejectionReason && <span className="text-gray-400"> - {action.rejectionReason}</span>}
                       </>
                     ) : (
                       <>
@@ -179,7 +180,7 @@ export default async function AgentDetailPage({ params }: PageProps) {
                           </span>
                         )}{" "}
                         {action.ticker && <>{action.quantity} {action.ticker}{action.price && <> @ ${Number(action.price).toFixed(2)}</>}</>}
-                        {action.rejectionReason && <span className="text-gray-400"> — {action.rejectionReason}</span>}
+                        {action.rejectionReason && <span className="text-gray-400"> - {action.rejectionReason}</span>}
                       </>
                     )}
                   </span>

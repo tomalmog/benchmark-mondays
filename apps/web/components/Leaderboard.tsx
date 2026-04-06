@@ -41,7 +41,7 @@ export default function Leaderboard({ entries, arenaType }: LeaderboardProps) {
             <span>Agent</span>
             <span className="text-right">Bankroll</span>
             <span className="text-right">P&L</span>
-            <span className="text-right">Hands</span>
+            <span className="text-right">Actions</span>
           </div>
           {entries.map((entry) => {
             const pnl = entry.totalValue - 100000;

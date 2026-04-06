@@ -11,7 +11,7 @@ export default function NavBar() {
 
   useEffect(() => {
     if (status !== "authenticated") { setCheckedAgent(false); return; }
-    fetch("/bmm/api/my-agent")
+    fetch("/api/my-agent")
       .then((res) => { setHasAgent(res.ok); setCheckedAgent(true); })
       .catch(() => setCheckedAgent(true));
   }, [status]);
@@ -51,7 +51,7 @@ export default function NavBar() {
           </div>
         ) : (
           <button
-            onClick={() => signIn("github", { callbackUrl: "/bmm" })}
+            onClick={() => signIn("github", { callbackUrl: "/" })}
             className="bg-gray-900 text-white px-3 py-1 text-xs font-semibold"
           >
             Sign in with GitHub
