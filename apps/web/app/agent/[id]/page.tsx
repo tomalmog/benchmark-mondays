@@ -31,6 +31,8 @@ interface AgentDetail {
   holdings: Record<string, number>;
   totalInferences: number;
   isPoker: boolean;
+  rank: number | null;
+  totalAgents: number;
   countMap: Record<string, number>;
   actions: AgentAction[];
 }
@@ -66,12 +68,20 @@ export default async function AgentDetailPage({ params }: PageProps) {
 
       <div className="border border-gray-200 bg-white p-6 mb-4">
         <div className="flex justify-between items-center">
-          <h1 className="text-xl font-bold">
-            {agent.name}{" "}
-            <span className="font-normal text-sm text-gray-400">
-              by @{agent.githubLogin}
-            </span>
-          </h1>
+          <div>
+            <h1 className="text-xl font-bold">
+              {agent.name}{" "}
+              <span className="font-normal text-sm text-gray-400">
+                by @{agent.githubLogin}
+              </span>
+            </h1>
+            {agent.rank != null && (
+              <div className="mt-1 text-sm text-gray-500">
+                Rank <span className={`font-bold ${agent.rank <= 3 ? "text-yellow-600" : "text-gray-900"}`}>#{agent.rank}</span>
+                <span className="text-gray-400"> of {agent.totalAgents} agents</span>
+              </div>
+            )}
+          </div>
           {isOwner && (
             <Link href="/agent/edit" className="text-xs bg-gray-100 border border-gray-300 px-3 py-1 hover:bg-gray-200">
               Edit Config

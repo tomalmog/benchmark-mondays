@@ -121,6 +121,12 @@ export function startApiServer(port = 3001) {
       getAgentActionCountsByType(agent.id).map((row) => [row.action_type, row.count])
     );
 
+    // Calculate rank
+    const leaderboard = getLeaderboard(agent.competition_id, 1000);
+    const rankIndex = leaderboard.findIndex((row) => row.agent_id === agent.id);
+    const rank = rankIndex >= 0 ? rankIndex + 1 : null;
+    const totalAgents = leaderboard.length;
+
     res.json({
       id: agent.id,
       name: agent.name,
@@ -132,6 +138,8 @@ export function startApiServer(port = 3001) {
       holdings,
       totalInferences: agent.total_inferences,
       isPoker: agent.arena_type === "poker",
+      rank,
+      totalAgents,
       countMap,
       actions: getAgentActions(agent.id, 50).map((row) => ({
         id: row.id,
