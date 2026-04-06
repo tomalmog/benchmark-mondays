@@ -1,103 +1,92 @@
-import { PrismaClient } from "@prisma/client";
 import { playMatch } from "./poker-match.mjs";
-
-const prisma = new PrismaClient();
+import {
+  createAction,
+  getPortfolio,
+  incrementInferences,
+  upsertPortfolio,
+  upsertRound,
+} from "./db.mjs";
 
 /**
- * Run a full round-robin poker competition.
- * Every agent plays every other agent in a heads-up match.
+ * Run a continuous poker competition with random matchups.
+ * Randomly pairs two agents, they play a match, repeat.
+ * Runs until stopped. Money is conserved — what one agent wins, the other loses.
  */
 export async function runPokerCompetition(config) {
-  const { competitionId, agents, seed, handsPerMatch = 3, onUpdate } = config;
+  const { competitionId, agents, seed, handsPerMatch = 1, maxMatches = 10000 } = config;
 
-  // Initialize bankrolls
+  // Load bankrolls from DB
   const bankrolls = {};
   for (const agent of agents) {
-    bankrolls[agent.id] = 100000;
+    const portfolio = getPortfolio(agent.id, competitionId);
+    bankrolls[agent.id] = portfolio ? Number(portfolio.cash) : 100000;
   }
 
-  // Generate all matchups (round-robin)
-  const matchups = [];
-  for (let i = 0; i < agents.length; i++) {
-    for (let j = i + 1; j < agents.length; j++) {
-      matchups.push([agents[i], agents[j]]);
-    }
-  }
-
-  console.log(`[poker] ${agents.length} agents, ${matchups.length} matchups, ${handsPerMatch} hands each`);
+  const totalMoneyStart = Object.values(bankrolls).reduce((a, b) => a + b, 0);
+  console.log(`[poker] ${agents.length} agents, random matchups, ${handsPerMatch} hands per match`);
+  console.log(`[poker] Total money in system: $${totalMoneyStart}`);
 
   let matchNum = 0;
-  for (const [agent1, agent2] of matchups) {
+
+  while (matchNum < maxMatches) {
     matchNum++;
-    console.log(`\n=== MATCH ${matchNum}/${matchups.length}: ${agent1.name} vs ${agent2.name} ===`);
+
+    // Randomly pick 2 different agents
+    const idx1 = Math.floor(Math.random() * agents.length);
+    let idx2 = Math.floor(Math.random() * (agents.length - 1));
+    if (idx2 >= idx1) idx2++;
+
+    const agent1 = agents[idx1];
+    const agent2 = agents[idx2];
+
+    console.log(`\n=== MATCH ${matchNum}: ${agent1.name} ($${bankrolls[agent1.id]}) vs ${agent2.name} ($${bankrolls[agent2.id]}) ===`);
 
     const result = await playMatch({
       agent1: { ...agent1, bankroll: bankrolls[agent1.id] },
       agent2: { ...agent2, bankroll: bankrolls[agent2.id] },
       numHands: handsPerMatch,
       seed: `${seed}-match-${matchNum}`,
-      onAction: async (action) => {
-        // Log actions to DB
+      onAction: (action) => {
         try {
-          const roundId = await getOrCreateRound(competitionId, matchNum);
-          if (action.sideEffects?.type === "hand_complete") {
-            await prisma.action.create({
-              data: {
-                agentId: action.agentId,
-                roundId,
-                competitionId,
-                actionType: action.args.action || "play",
-                ticker: null,
-                quantity: null,
-                price: action.args.amount ? Number(action.args.amount) : null,
-                rejected: false,
-                rejectionReason: action.result,
-              },
-            });
-          } else {
-            await prisma.action.create({
-              data: {
-                agentId: action.agentId,
-                roundId,
-                competitionId,
-                actionType: action.args.action || "play",
-                ticker: null,
-                quantity: null,
-                price: action.args.amount ? Number(action.args.amount) : null,
-                rejected: false,
-              },
-            });
-          }
-        } catch (err) {
-          // Don't let DB errors stop the game
-        }
+          const roundId = getOrCreateRound(competitionId, matchNum);
+          createAction({
+            agentId: action.agentId,
+            roundId,
+            competitionId,
+            actionType: action.args.action || "play",
+            price: action.args.amount ? Number(action.args.amount) : null,
+            rejected: false,
+            rejectionReason: action.result,
+          });
+        } catch {}
 
-        // Update inference count
-        prisma.agent.update({
-          where: { id: action.agentId },
-          data: { totalInferences: { increment: 1 } },
-        }).catch(() => {});
+        try {
+          incrementInferences(action.agentId);
+        } catch {}
       },
       onHandResult: (handResult) => {
-        // Update bankrolls from hand result
         for (const [id, amount] of Object.entries(handResult.bankrolls)) {
           bankrolls[id] = amount;
         }
       },
     });
 
-    // Update bankrolls from match result
+    // Update bankrolls from match
     for (const [id, amount] of Object.entries(result.bankrolls)) {
       bankrolls[id] = amount;
     }
 
-    // Persist bankrolls to DB after each match
+    // Verify money conservation
+    const totalMoney = Object.values(bankrolls).reduce((a, b) => a + b, 0);
+    if (Math.abs(totalMoney - totalMoneyStart) > 1) {
+      console.error(`[poker] MONEY LEAK! Expected $${totalMoneyStart}, got $${totalMoney}`);
+    }
+
+    // Persist to DB
     for (const agent of agents) {
-      await prisma.portfolio.upsert({
-        where: { agentId_competitionId: { agentId: agent.id, competitionId } },
-        create: { agentId: agent.id, competitionId, cash: bankrolls[agent.id], holdings: {}, totalValue: bankrolls[agent.id] },
-        update: { cash: bankrolls[agent.id], totalValue: bankrolls[agent.id], holdings: {} },
-      }).catch((err) => console.error("[poker] Portfolio update failed:", err.message));
+      try {
+        upsertPortfolio(agent.id, competitionId, bankrolls[agent.id], {}, bankrolls[agent.id]);
+      } catch {}
     }
 
     // Print standings
@@ -105,35 +94,21 @@ export async function runPokerCompetition(config) {
       .map((a) => ({ name: a.name, bankroll: bankrolls[a.id] }))
       .sort((a, b) => b.bankroll - a.bankroll);
 
-    console.log(`\n--- Standings after match ${matchNum} ---`);
+    console.log(`--- Standings after match ${matchNum} (Total: $${totalMoney}) ---`);
     for (let i = 0; i < standings.length; i++) {
       const pnl = standings[i].bankroll - 100000;
-      console.log(`  #${i + 1} ${standings[i].name.padEnd(15)} $${standings[i].bankroll.toFixed(0)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(0)})`);
+      console.log(`  #${i + 1} ${standings[i].name.padEnd(20)} $${standings[i].bankroll.toFixed(0).padStart(7)} (${pnl >= 0 ? "+" : ""}${pnl.toFixed(0)})`);
     }
-
-    if (onUpdate) onUpdate(bankrolls);
   }
-
-  // Mark competition complete
-  await prisma.competition.update({
-    where: { id: competitionId },
-    data: { status: "completed" },
-  }).catch(() => {});
 
   return { bankrolls };
 }
 
 const roundCache = {};
-async function getOrCreateRound(competitionId, matchNum) {
+function getOrCreateRound(competitionId, matchNum) {
   const key = `${competitionId}-${matchNum}`;
   if (roundCache[key]) return roundCache[key];
-
-  const round = await prisma.round.upsert({
-    where: { competitionId_roundNumber: { competitionId, roundNumber: matchNum } },
-    create: { competitionId, roundNumber: matchNum, status: "committed", marketState: {}, startedAt: new Date(), committedAt: new Date() },
-    update: {},
-  });
-
-  roundCache[key] = round.id;
-  return round.id;
+  const roundId = upsertRound(competitionId, matchNum, "committed", {});
+  roundCache[key] = roundId;
+  return roundId;
 }

@@ -56,24 +56,18 @@ Royal Flush > Straight Flush > Four of a Kind > Full House > Flush > Straight > 
   },
 
   getToolDefinitions(): string {
-    return `AVAILABLE ACTIONS — respond with ONE JSON object:
+    return `Each turn you will see your cards and the board.
 
-1. See your hand and the board:
-   {"tool": "check_hand", "args": {}}
+RESPOND WITH A SINGLE NUMBER FROM 1 TO 10 rating how confident you are in your hand.
 
-2. Play an action:
-   {"tool": "play_action", "args": {"action": "call"}}
-   {"tool": "play_action", "args": {"action": "fold"}}
-   {"tool": "play_action", "args": {"action": "raise", "amount": 2000}}
-   {"tool": "play_action", "args": {"action": "check"}}
+1 = terrible hand, want to fold
+2-3 = weak hand, probably should fold
+4-5 = mediocre hand, might call
+6-7 = decent hand, worth calling or small raise
+8-9 = strong hand, should raise
+10 = monster hand, raise big
 
-3. Check your bankroll:
-   {"tool": "check_bankroll", "args": {}}
-
-4. Check leaderboard:
-   {"tool": "check_leaderboard", "args": {}}
-
-RESPOND WITH ONLY ONE JSON OBJECT. NO OTHER TEXT.`;
+RESPOND WITH ONLY ONE NUMBER. NOTHING ELSE. JUST THE NUMBER.`;
   },
 
   summarizeState(portfolio: Portfolio): string {

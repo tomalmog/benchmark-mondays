@@ -8,8 +8,12 @@
     "dev": "node src/index.mjs"
   },
   "dependencies": {
+    "@weekly-benchmark/arena-poker": "*",
     "@weekly-benchmark/arena-stock-exchange": "*",
-    "@weekly-benchmark/shared": "*"
+    "@weekly-benchmark/shared": "*",
+    "better-sqlite3": "^12.8.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
   },
   "optionalDependencies": {
     "node-llama-cpp": "^3.18.1"

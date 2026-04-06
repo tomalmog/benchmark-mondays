@@ -1,31 +1,30 @@
-import { PrismaClient } from "@prisma/client";
 import { runPokerCompetition } from "../apps/engine/src/poker-competition.mjs";
 import { disposeLlama } from "../apps/engine/src/model-runner.mjs";
-
-const prisma = new PrismaClient();
+import { getActiveCompetition, getAgentsForCompetition } from "../apps/engine/src/db.mjs";
 
 async function main() {
-  const competition = await prisma.competition.findFirst({
-    where: { status: "active" },
-    include: { agents: { where: { status: "active" }, include: { user: true } } },
-  });
+  const competition = getActiveCompetition();
+  if (!competition) {
+    console.error("No active competition");
+    process.exit(1);
+  }
 
-  if (!competition || competition.agents.length < 2) {
+  const agents = getAgentsForCompetition(competition.id);
+  if (agents.length < 2) {
     console.error("Need at least 2 agents for poker");
     process.exit(1);
   }
 
-  console.log(`=== ${competition.name} — ${competition.agents.length} agents ===\n`);
-
-  const agents = competition.agents.map((a) => ({
+  console.log(`=== ${competition.name} — ${agents.length} agents ===\n`);
+  const agentConfigs = agents.map((a) => ({
     id: a.id,
     name: a.name,
-    config: a.config,
+    config: typeof a.config === "string" ? JSON.parse(a.config) : a.config,
   }));
 
   const result = await runPokerCompetition({
     competitionId: competition.id,
-    agents,
+    agents: agentConfigs,
     seed: competition.seed,
     handsPerMatch: 3,
   });
@@ -33,7 +32,7 @@ async function main() {
   console.log("\n=== FINAL RESULTS ===");
   const sorted = Object.entries(result.bankrolls)
     .map(([id, bankroll]) => ({
-      name: agents.find((a) => a.id === id)?.name || id,
+      name: agentConfigs.find((a) => a.id === id)?.name || id,
       bankroll,
     }))
     .sort((a, b) => b.bankroll - a.bankroll);
@@ -44,7 +43,6 @@ async function main() {
   }
 
   await disposeLlama();
-  await prisma.$disconnect();
   process.exit(0);
 }
 

@@ -1,40 +1,50 @@
-import { PrismaClient } from "@prisma/client";
 import { CompetitionManager } from "./competition-manager.mjs";
 import { stockExchangeArena } from "@weekly-benchmark/arena-stock-exchange";
 import { runPokerCompetition } from "./poker-competition.mjs";
 import { disposeLlama } from "./model-runner.mjs";
-
-const prisma = new PrismaClient();
+import { startApiServer, stopApiServer } from "./api-server.mjs";
+import { getActiveCompetition, getAgentsForCompetition } from "./db.mjs";
 
 async function main() {
-  console.log("[engine] Weekly Benchmark Engine v2");
+  console.log("[engine] Weekly Benchmark Engine v3 (SQLite + L4)");
 
-  const competition = await prisma.competition.findFirst({
-    where: { status: "active" },
-    include: {
-      agents: { where: { status: "active" }, include: { user: true } },
-    },
-  });
+  const apiPort = Number(process.env.API_PORT || 3001);
+  startApiServer(apiPort);
 
+  const competition = getActiveCompetition();
   if (!competition) {
-    console.error("[engine] No active competition");
-    process.exit(1);
+    console.log("[engine] No active competition - API server running, waiting for competition.");
+    return;
   }
 
-  if (competition.agents.length === 0) {
-    console.error("[engine] No agents registered");
-    process.exit(1);
+  const agents = getAgentsForCompetition(competition.id);
+  if (agents.length === 0) {
+    console.log("[engine] No agents registered - API server running, waiting for agents.");
+    return;
   }
 
-  console.log(`[engine] ${competition.name} — ${competition.agents.length} agents`);
+  console.log(`[engine] ${competition.name} - ${agents.length} agents - arena: ${competition.arena_type}`);
 
-  // Select arena based on competition type
-  const arenaMap = {
-    "stock-exchange": stockExchangeArena,
-  };
-  const arena = arenaMap[competition.arenaType];
+  const agentConfigs = agents.map((agent) => ({
+    id: agent.id,
+    name: agent.name,
+    config: typeof agent.config === "string" ? JSON.parse(agent.config) : agent.config,
+  }));
+
+  if (competition.arena_type === "poker") {
+    await runPokerCompetition({
+      competitionId: competition.id,
+      agents: agentConfigs,
+      seed: competition.seed,
+      handsPerMatch: 3,
+    });
+    return;
+  }
+
+  const arenaMap = { "stock-exchange": stockExchangeArena };
+  const arena = arenaMap[competition.arena_type];
   if (!arena) {
-    console.error(`[engine] Unknown arena type: ${competition.arenaType}`);
+    console.error(`[engine] Unknown arena type: ${competition.arena_type}`);
     process.exit(1);
   }
 
@@ -42,7 +52,7 @@ async function main() {
     competitionId: competition.id,
     seed: competition.seed,
     arena,
-    agents: competition.agents.map((a) => ({
+    agents: agentConfigs.map((a) => ({
       id: a.id,
       name: a.name,
       config: a.config,
@@ -53,7 +63,7 @@ async function main() {
     console.log("\n[engine] Shutting down...");
     await manager.stop();
     await disposeLlama();
-    await prisma.$disconnect();
+    stopApiServer();
     process.exit(0);
   }
 

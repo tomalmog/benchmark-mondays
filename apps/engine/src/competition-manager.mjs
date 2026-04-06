@@ -1,8 +1,14 @@
-import { PrismaClient } from "@prisma/client";
 import { generatePrices, score } from "@weekly-benchmark/arena-stock-exchange";
 import { runAgentTurn } from "./agent-loop.mjs";
-
-const prisma = new PrismaClient();
+import {
+  createAction,
+  incrementInferences,
+  updateAgentLastError,
+  updateCompetitionRound,
+  updateCompetitionStatus,
+  upsertPortfolio,
+  upsertRound,
+} from "./db.mjs";
 const MARKET_TICK_INTERVAL_MS = 30_000;
 
 export class CompetitionManager {
@@ -82,17 +88,11 @@ export class CompetitionManager {
           await this.persistPortfolios();
           await this.flushActions();
 
-          prisma.agent.update({
-            where: { id: agent.id },
-            data: { totalInferences: { increment: result.toolCalls } },
-          }).catch(() => {});
+          incrementInferences(agent.id, result.toolCalls);
 
         } catch (err) {
           console.error(`[competition] ${agent.name} failed:`, err.message);
-          prisma.agent.update({
-            where: { id: agent.id },
-            data: { lastError: err.message },
-          }).catch(() => {});
+          updateAgentLastError(agent.id, err.message);
         }
       }
 
@@ -135,38 +135,34 @@ export class CompetitionManager {
 
     for (const action of batch) {
       try {
-        const roundId = await this.getOrCreateRound(this.state.tick);
+        const roundId = this.getOrCreateRound(this.state.tick);
 
         if (action.sideEffects?.type === "trade") {
           const order = action.sideEffects.order;
-          await prisma.action.create({
-            data: {
-              agentId: action.agentId,
-              roundId,
-              competitionId: this.competitionId,
-              actionType: order.action,
-              ticker: order.ticker,
-              quantity: order.quantity,
-              price: order.price,
-              transactionCost: order.transactionCost,
-              rejected: false,
-            },
+          createAction({
+            agentId: action.agentId,
+            roundId,
+            competitionId: this.competitionId,
+            actionType: order.action,
+            ticker: order.ticker,
+            quantity: order.quantity,
+            price: order.price,
+            transactionCost: order.transactionCost,
+            rejected: false,
           });
         } else if (action.tool === "place_order" && action.result.includes('"success":false')) {
           let reason = "unknown";
           try { reason = JSON.parse(action.result).reason || "unknown"; } catch {}
           const args = action.args || {};
-          await prisma.action.create({
-            data: {
-              agentId: action.agentId,
-              roundId,
-              competitionId: this.competitionId,
-              actionType: args.action || "buy",
-              ticker: args.ticker,
-              quantity: typeof args.quantity === "number" ? Math.floor(args.quantity) : null,
-              rejected: true,
-              rejectionReason: reason,
-            },
+          createAction({
+            agentId: action.agentId,
+            roundId,
+            competitionId: this.competitionId,
+            actionType: args.action || "buy",
+            ticker: args.ticker,
+            quantity: typeof args.quantity === "number" ? Math.floor(args.quantity) : null,
+            rejected: true,
+            rejectionReason: reason,
           });
         }
       } catch (err) {
@@ -178,36 +174,22 @@ export class CompetitionManager {
   async persistPortfolios() {
     for (const [agentId, portfolio] of Object.entries(this.state.portfolios)) {
       const totalValue = score(portfolio, { round: this.state.tick, market: this.state.market });
-      await prisma.portfolio.update({
-        where: { agentId_competitionId: { agentId, competitionId: this.competitionId } },
-        data: { cash: portfolio.cash, holdings: portfolio.holdings, totalValue },
-      }).catch((err) => console.error(`[competition] Portfolio update failed:`, err.message));
+      try {
+        upsertPortfolio(agentId, this.competitionId, portfolio.cash, portfolio.holdings, totalValue);
+      } catch (err) {
+        console.error(`[competition] Portfolio update failed:`, err.message);
+      }
     }
 
-    await prisma.competition.update({
-      where: { id: this.competitionId },
-      data: { currentRound: this.state.tick },
-    }).catch(() => {});
+    updateCompetitionRound(this.competitionId, this.state.tick);
   }
 
-  async getOrCreateRound(tick) {
+  getOrCreateRound(tick) {
     if (this._roundCache[tick]) return this._roundCache[tick];
 
-    const round = await prisma.round.upsert({
-      where: { competitionId_roundNumber: { competitionId: this.competitionId, roundNumber: tick } },
-      create: {
-        competitionId: this.competitionId,
-        roundNumber: tick,
-        status: "committed",
-        marketState: this.state.market,
-        startedAt: new Date(),
-        committedAt: new Date(),
-      },
-      update: {},
-    });
-
-    this._roundCache[tick] = round.id;
-    return round.id;
+    const roundId = upsertRound(this.competitionId, tick, "committed", this.state.market);
+    this._roundCache[tick] = roundId;
+    return roundId;
   }
 
   async stop() {
@@ -220,10 +202,7 @@ export class CompetitionManager {
     await this.flushActions();
     await this.persistPortfolios();
 
-    await prisma.competition.update({
-      where: { id: this.competitionId },
-      data: { status: "completed", currentRound: this.state.tick },
-    }).catch(() => {});
+    updateCompetitionStatus(this.competitionId, "completed", this.state.tick);
 
     console.log("[competition] Stopped");
   }

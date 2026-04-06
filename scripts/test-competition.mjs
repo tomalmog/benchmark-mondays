@@ -43,12 +43,13 @@ async function main() {
   const DURATION_MS = 90 * 1000;
 
   console.log(`Starting competition (running for ${DURATION_MS / 1000}s)...\n`);
-  await manager.start();
+  const runPromise = manager.start();
 
   await new Promise((resolve) => setTimeout(resolve, DURATION_MS));
 
   console.log("\n=== Stopping competition ===\n");
   await manager.stop();
+  await runPromise;
 
   console.log("\n=== Final Standings ===");
   const standings = manager.getStandings();

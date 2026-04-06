@@ -1,15 +1,9 @@
 import { createSession } from "./model-runner.mjs";
 import {
-  createGame,
-  applyAction,
-  getPlayerView,
-  getActivePlayerIndex,
   pokerArena,
 } from "@weekly-benchmark/arena-poker";
+import { createDeck, shuffleDeck, formatCards, evaluateHand, compareHands } from "@weekly-benchmark/arena-poker";
 
-/**
- * Simple seeded PRNG for card shuffling
- */
 function createRng(seed) {
   let state = seed | 0;
   return () => {
@@ -29,142 +23,206 @@ function hashString(str) {
 }
 
 /**
- * Extract JSON from model response
+ * Get a confidence rating (1-10) from the model.
+ * Returns a number 1-10. Defaults to 5 if unparseable.
  */
-function extractJson(text) {
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "{") { if (depth === 0) start = i; depth++; }
-    else if (text[i] === "}") {
-      depth--;
-      if (depth === 0 && start >= 0) {
-        try { return JSON.parse(text.substring(start, i + 1)); } catch {}
-        start = -1;
-      }
-    }
-  }
-  return null;
+async function getConfidence(session, prompt) {
+  const response = await session.prompt(prompt);
+  const cleaned = response.trim();
+  console.log(`  → rated: ${cleaned.substring(0, 50)}`);
+
+  const match = cleaned.match(/\b(10|[1-9])\b/);
+  if (match) return parseInt(match[1]);
+  return 5; // default medium confidence
 }
 
-const ALLOWED_ACTIONS = new Set(["fold", "call", "raise", "check"]);
+/**
+ * Convert confidence to a bet multiplier.
+ * 1-2: fold (0), 3-4: check/call (1x blind), 5-6: small bet (2x), 7-8: raise (4x), 9-10: big raise (8x)
+ */
+function confidenceToBet(confidence) {
+  // Add some randomness so it's not perfectly deterministic
+  const noise = Math.floor(Math.random() * 3) - 1; // -1, 0, or +1
+  const adjusted = Math.max(1, Math.min(10, confidence + noise));
+
+  if (adjusted <= 3) return { action: "fold", bet: 0 };
+  if (adjusted <= 6) return { action: "call", bet: 10 + Math.floor(Math.random() * 20) };
+  if (adjusted <= 8) return { action: "raise", bet: 30 + Math.floor(Math.random() * 50) };
+  return { action: "raise", bet: 80 + Math.floor(Math.random() * 120) };
+}
+
+const BLIND = 25;
 
 /**
- * Run a single hand of heads-up poker between two agents.
- * Returns the result: { winner, winAmount, actions, bankrolls }
+ * Play a single hand. Simple flow:
+ * - Deal hole cards, each player rates once → betting
+ * - Deal flop, each player rates once → betting
+ * - Deal turn, each player rates once → betting
+ * - Deal river, each player rates once → betting
+ * - Showdown
+ *
+ * Each "betting round" = both players rate, higher bet wins the round.
+ * If someone folds, hand is over.
  */
 export async function playHand(config) {
   const { agent1, agent2, handNumber, seed, onAction } = config;
 
   const rng = createRng(hashString(seed) + handNumber * 7919);
+  const deck = shuffleDeck(createDeck(), rng);
 
-  const game = createGame(
-    agent1.id, agent1.bankroll,
-    agent2.id, agent2.bankroll,
-    rng
-  );
+  let idx = 0;
+  const hole1 = [deck[idx++], deck[idx++]];
+  const hole2 = [deck[idx++], deck[idx++]];
+  const community = [];
 
-  const agents = { [agent1.id]: agent1, [agent2.id]: agent2 };
+  let bank1 = agent1.bankroll;
+  let bank2 = agent2.bankroll;
+  let pot = 0;
+
+  // Post blinds
+  const sb = BLIND / 2;
+  bank1 -= sb;
+  bank2 -= BLIND;
+  pot = sb + BLIND;
+
+  // Create sessions
   const sessions = {};
-
-  // Create sessions for both players
   for (const agent of [agent1, agent2]) {
     const systemPrompt = [
       agent.config.systemPrompt,
-      agent.config.examplesText ? "\n\nEXAMPLES:\n" + agent.config.examplesText.slice(0, 3000) : "",
+      agent.config.examplesText ? "\nEXAMPLES:\n" + agent.config.examplesText.slice(0, 2000) : "",
       "---",
       pokerArena.getRules(),
       "---",
       pokerArena.getToolDefinitions(),
     ].join("\n\n");
-
     sessions[agent.id] = await createSession(systemPrompt, agent.config);
   }
 
-  let maxTurns = 20; // safety limit per hand
+  let winner = null;
+  let winReason = "";
+  let winAmount = 0;
+
+  const phases = [
+    { name: "PREFLOP", deal: 0 },
+    { name: "FLOP", deal: 3 },
+    { name: "TURN", deal: 1 },
+    { name: "RIVER", deal: 1 },
+  ];
 
   try {
-    while (game.phase !== "done" && game.phase !== "showdown" && maxTurns > 0) {
-      const activeIdx = getActivePlayerIndex(game);
-      if (activeIdx === -1) {
-        // Phase should advance — force it by dealing
+    for (const phase of phases) {
+      // Deal community cards
+      if (phase.deal > 0) {
+        idx++; // burn
+        for (let i = 0; i < phase.deal; i++) {
+          community.push(deck[idx++]);
+        }
+      }
+
+      const boardStr = community.length > 0 ? `Board: ${formatCards(community)}` : "No community cards yet";
+
+      // Player 1 rates
+      const prompt1 = `${phase.name}\nYour cards: ${formatCards(hole1)}\n${boardStr}\nPot: $${pot}\nYour bankroll: $${bank1}\n\nRate your hand 1-10:`;
+      console.log(`[hand ${handNumber}] ${phase.name} - ${agent1.name}:`);
+      const conf1 = await getConfidence(sessions[agent1.id], prompt1);
+
+      // Player 2 rates
+      const prompt2 = `${phase.name}\nYour cards: ${formatCards(hole2)}\n${boardStr}\nPot: $${pot}\nYour bankroll: $${bank2}\n\nRate your hand 1-10:`;
+      console.log(`[hand ${handNumber}] ${phase.name} - ${agent2.name}:`);
+      const conf2 = await getConfidence(sessions[agent2.id], prompt2);
+
+      const bet1 = confidenceToBet(conf1);
+      const bet2 = confidenceToBet(conf2);
+
+      console.log(`[hand ${handNumber}] ${agent1.name}: ${conf1}/10 → ${bet1.action} $${bet1.bet} | ${agent2.name}: ${conf2}/10 → ${bet2.action} $${bet2.bet}`);
+
+      // Log actions
+      if (onAction) {
+        onAction({ agentId: agent1.id, tool: "play_action", args: { action: bet1.action, amount: bet1.bet }, result: `${conf1}/10`, timestamp: new Date().toISOString() });
+        onAction({ agentId: agent2.id, tool: "play_action", args: { action: bet2.action, amount: bet2.bet }, result: `${conf2}/10`, timestamp: new Date().toISOString() });
+      }
+
+      // Handle folds
+      if (bet1.action === "fold" && bet2.action === "fold") {
+        // Both fold — split pot (weird but whatever)
+        bank1 += Math.floor(pot / 2);
+        bank2 += pot - Math.floor(pot / 2);
+        winner = null;
+        winReason = "Both folded";
+        winAmount = 0;
+        pot = 0;
         break;
       }
 
-      const activePlayer = game.players[activeIdx];
-      const session = sessions[activePlayer.id];
-      const view = getPlayerView(game, activePlayer.id);
-
-      const prompt = `Hand #${handNumber}\n\n${view}\n\nWhat do you want to do? Respond with ONE JSON: {"tool": "play_action", "args": {"action": "call"}}`;
-
-      const response = await session.prompt(prompt);
-      console.log(`[poker:${activePlayer.id.slice(0, 8)}] ${response.substring(0, 150)}`);
-
-      const toolCall = extractJson(response);
-
-      if (!toolCall || toolCall.tool !== "play_action" || !toolCall.args) {
-        // Default to call if model doesn't respond properly
-        const result = applyAction(game, activeIdx, "call");
-        console.log(`[poker] ${activePlayer.id.slice(0, 8)} auto-calls (invalid response)`);
-        if (onAction) onAction({ agentId: activePlayer.id, tool: "play_action", args: { action: "call" }, result, timestamp: new Date().toISOString() });
-        maxTurns--;
-        continue;
+      if (bet1.action === "fold") {
+        bank2 += pot;
+        winner = agent2.id;
+        winReason = "opponent folded";
+        winAmount = pot;
+        pot = 0;
+        console.log(`[hand ${handNumber}] ${agent1.name} folds → ${agent2.name} wins $${winAmount}`);
+        break;
       }
 
-      const action = toolCall.args.action;
-      if (!ALLOWED_ACTIONS.has(action)) {
-        const result = applyAction(game, activeIdx, "call");
-        if (onAction) onAction({ agentId: activePlayer.id, tool: "play_action", args: { action: "call" }, result, timestamp: new Date().toISOString() });
-        maxTurns--;
-        continue;
+      if (bet2.action === "fold") {
+        bank1 += pot;
+        winner = agent1.id;
+        winReason = "opponent folded";
+        winAmount = pot;
+        pot = 0;
+        console.log(`[hand ${handNumber}] ${agent2.name} folds → ${agent1.name} wins $${winAmount}`);
+        break;
       }
 
-      const raiseAmount = action === "raise" ? Math.max(1000, Math.min(100000, Number(toolCall.args.amount) || 1000)) : 0;
-      const result = applyAction(game, activeIdx, action, raiseAmount);
-      console.log(`[poker] ${result}`);
-
-      if (onAction) {
-        onAction({
-          agentId: activePlayer.id,
-          tool: "play_action",
-          args: { action, amount: raiseAmount },
-          result,
-          sideEffects: game.phase === "done" ? { type: "hand_complete", winner: game.winner, winAmount: game.winAmount } : undefined,
-          timestamp: new Date().toISOString(),
-        });
-      }
-
-      maxTurns--;
+      // Both stay in — add bets to pot
+      const roundBet = Math.max(bet1.bet, bet2.bet);
+      bank1 -= roundBet;
+      bank2 -= roundBet;
+      pot += roundBet * 2;
     }
 
-    // If we ran out of turns without resolution, auto-resolve
-    if (game.phase !== "done") {
-      // Force call remaining bets and go to showdown
-      while (game.phase !== "done" && game.phase !== "showdown") {
-        const idx = getActivePlayerIndex(game);
-        if (idx === -1) break;
-        applyAction(game, idx, "call");
+    // Showdown if nobody folded
+    if (winner === null && pot > 0) {
+      const result = compareHands(hole1, hole2, community);
+      const hand1 = evaluateHand([...hole1, ...community]);
+      const hand2 = evaluateHand([...hole2, ...community]);
+
+      if (result > 0) {
+        winner = agent1.id;
+        winReason = `${hand1.name} beats ${hand2.name}`;
+        winAmount = pot;
+        bank1 += pot;
+      } else if (result < 0) {
+        winner = agent2.id;
+        winReason = `${hand2.name} beats ${hand1.name}`;
+        winAmount = pot;
+        bank2 += pot;
+      } else {
+        winReason = "Split pot";
+        winAmount = 0;
+        bank1 += Math.floor(pot / 2);
+        bank2 += pot - Math.floor(pot / 2);
       }
+
+      console.log(`[hand ${handNumber}] Showdown: ${agent1.name} ${formatCards(hole1)} (${hand1.name}) vs ${agent2.name} ${formatCards(hole2)} (${hand2.name})`);
+      console.log(`[hand ${handNumber}] ${winner ? (winner === agent1.id ? agent1.name : agent2.name) + ' wins' : 'Split'} $${winAmount} (${winReason})`);
     }
 
     return {
-      winner: game.winner,
-      winAmount: game.winAmount,
-      winReason: game.winReason,
-      player1Bankroll: game.players[0].bankroll,
-      player2Bankroll: game.players[1].bankroll,
+      winner,
+      winAmount,
+      winReason,
+      player1Bankroll: bank1,
+      player2Bankroll: bank2,
     };
   } finally {
-    // Dispose sessions
     for (const session of Object.values(sessions)) {
       await session.dispose().catch(() => {});
     }
   }
 }
 
-/**
- * Run a match: multiple hands between two agents.
- */
 export async function playMatch(config) {
   const { agent1, agent2, numHands = 5, seed, onAction, onHandResult } = config;
 
@@ -174,20 +232,17 @@ export async function playMatch(config) {
   for (let i = 0; i < numHands; i++) {
     console.log(`\n--- Hand ${i + 1}/${numHands}: ${agent1.name} vs ${agent2.name} ---`);
 
-    // Alternate dealer each hand
+    // Alternate dealer
     const isAgent1Dealer = i % 2 === 0;
-    const dealer = isAgent1Dealer ? agent1 : agent2;
-    const nonDealer = isAgent1Dealer ? agent2 : agent1;
 
     const result = await playHand({
-      agent1: { ...dealer, bankroll: isAgent1Dealer ? bankroll1 : bankroll2 },
-      agent2: { ...nonDealer, bankroll: isAgent1Dealer ? bankroll2 : bankroll1 },
+      agent1: isAgent1Dealer ? { ...agent1, bankroll: bankroll1 } : { ...agent2, bankroll: bankroll2 },
+      agent2: isAgent1Dealer ? { ...agent2, bankroll: bankroll2 } : { ...agent1, bankroll: bankroll1 },
       handNumber: i + 1,
       seed: seed + `-hand-${i}`,
       onAction,
     });
 
-    // Update bankrolls
     if (isAgent1Dealer) {
       bankroll1 = result.player1Bankroll;
       bankroll2 = result.player2Bankroll;
@@ -199,7 +254,6 @@ export async function playMatch(config) {
     const winnerName = result.winner === agent1.id ? agent1.name :
                        result.winner === agent2.id ? agent2.name : "Split";
 
-    console.log(`[poker] Hand ${i + 1} result: ${winnerName} wins $${result.winAmount} (${result.winReason})`);
     console.log(`[poker] ${agent1.name}: $${bankroll1} | ${agent2.name}: $${bankroll2}`);
 
     if (onHandResult) {
@@ -213,7 +267,5 @@ export async function playMatch(config) {
     }
   }
 
-  return {
-    bankrolls: { [agent1.id]: bankroll1, [agent2.id]: bankroll2 },
-  };
+  return { bankrolls: { [agent1.id]: bankroll1, [agent2.id]: bankroll2 } };
 }

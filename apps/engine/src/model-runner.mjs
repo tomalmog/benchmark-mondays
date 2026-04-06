@@ -1,7 +1,7 @@
 import { getLlama, LlamaChatSession } from "node-llama-cpp";
 
 // Platform default model path
-export const PLATFORM_MODEL_PATH = "./uploads/test-models/hf_bartowski_Qwen2.5-3B-Instruct-Q4_K_M.gguf";
+export const PLATFORM_MODEL_PATH = "./uploads/test-models/hf_Qwen_qwen2.5-1.5b-instruct-q4_k_m.gguf";
 
 let llamaInstance = null;
 let loadedModel = null;

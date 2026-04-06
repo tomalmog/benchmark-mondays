@@ -7,3 +7,7 @@ dist
 .env.local
 uploads/
 *.gguf
+.gstack/
+data/
+.vercel
+.env.vercel*

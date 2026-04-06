@@ -1,38 +1,34 @@
-import { PrismaClient } from "@prisma/client";
 import { CompetitionManager } from "../apps/engine/src/competition-manager.mjs";
-
-const prisma = new PrismaClient();
+import {
+  countActions,
+  getActiveCompetition,
+  getAgentsForCompetition,
+  getPortfoliosForCompetition,
+} from "../apps/engine/src/db.mjs";
 const DURATION_MS = 10 * 60 * 1000; // 10 minutes
 
 async function main() {
   console.log("=== Weekly Benchmark — Full Competition Test ===\n");
 
   // Load active competition from DB
-  const competition = await prisma.competition.findFirst({
-    where: { status: "active" },
-    include: {
-      agents: {
-        where: { status: "active" },
-        include: { user: true },
-      },
-    },
-  });
+  const competition = getActiveCompetition();
 
   if (!competition) {
     console.error("No active competition found");
     process.exit(1);
   }
 
+  const agents = getAgentsForCompetition(competition.id);
+
   console.log(`Competition: ${competition.name} (${competition.id})`);
-  console.log(`Agents: ${competition.agents.length}`);
+  console.log(`Agents: ${agents.length}`);
   console.log(`Seed: ${competition.seed}`);
   console.log(`Duration: ${DURATION_MS / 1000}s\n`);
 
-  const agents = competition.agents.map((a) => ({
+  const agentConfigs = agents.map((a) => ({
     id: a.id,
     name: a.name,
-    modelPath: a.modelPath,
-    systemPrompt: a.systemPrompt,
+    config: typeof a.config === "string" ? JSON.parse(a.config) : a.config,
   }));
 
   let tradeCount = 0;
@@ -41,7 +37,7 @@ async function main() {
   const manager = new CompetitionManager({
     competitionId: competition.id,
     seed: competition.seed,
-    agents,
+    agents: agentConfigs,
     onAction: (action) => {
       totalInferences++;
       if (action.sideEffects?.type === "trade") {
@@ -68,7 +64,7 @@ async function main() {
   });
 
   console.log("Starting competition...\n");
-  await manager.start();
+  const runPromise = manager.start();
 
   // Run for the duration
   await new Promise((resolve) => setTimeout(resolve, DURATION_MS));
@@ -100,22 +96,16 @@ async function main() {
   console.log("=".repeat(60));
 
   // Verify data in DB
-  const dbActions = await prisma.action.count({
-    where: { competitionId: competition.id },
-  });
-  const dbPortfolios = await prisma.portfolio.findMany({
-    where: { competitionId: competition.id },
-    include: { agent: true },
-    orderBy: { totalValue: "desc" },
-  });
+  await runPromise;
+  const dbActions = countActions(competition.id);
+  const dbPortfolios = getPortfoliosForCompetition(competition.id);
 
   console.log(`\n  DB verification:`);
   console.log(`    Actions in DB: ${dbActions}`);
   for (const p of dbPortfolios) {
-    console.log(`    ${p.agent.name}: $${Number(p.totalValue).toFixed(2)} (DB)`);
+    console.log(`    ${p.agent_name}: $${Number(p.total_value).toFixed(2)} (DB)`);
   }
 
-  await prisma.$disconnect();
   process.exit(0);
 }
 

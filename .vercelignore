@@ -1,6 +1,9 @@
-apps/engine
-apps/dummy-agent
-packages/arena-poker
-packages/arena-stock-exchange
+.git
+.DS_Store
+node_modules
+data
 uploads
-scripts
+docs
+.gstack
+.next
+*.log
