@@ -30,13 +30,13 @@ export default function Leaderboard({ entries, arenaType }: LeaderboardProps) {
   const isPoker = arenaType === "poker";
 
   return (
-    <div className="border border-gray-200 bg-white">
+    <div className="border border-gray-200 bg-white overflow-x-auto">
       <div className="px-4 py-3 text-xs font-bold uppercase tracking-wider border-b border-gray-100">
         Live Leaderboard
       </div>
       {isPoker ? (
-        <>
-          <div className="grid grid-cols-[40px_1fr_100px_80px_60px] px-4 py-2 text-xs uppercase text-gray-400 font-semibold border-b border-gray-200">
+        <div className="min-w-0">
+          <div className="grid grid-cols-[28px_1fr_auto_auto_auto] gap-x-3 px-3 sm:px-4 py-2 text-xs uppercase text-gray-400 font-semibold border-b border-gray-200">
             <span>#</span>
             <span>Agent</span>
             <span className="text-right">Bankroll</span>
@@ -49,36 +49,35 @@ export default function Leaderboard({ entries, arenaType }: LeaderboardProps) {
               <Link
                 key={entry.id}
                 href={`/agent/${entry.id}`}
-                className="grid grid-cols-[40px_1fr_100px_80px_60px] px-4 py-3 border-b border-gray-50 hover:bg-gray-50 items-center text-sm"
+                className="grid grid-cols-[28px_1fr_auto_auto_auto] gap-x-3 px-3 sm:px-4 py-3 border-b border-gray-50 hover:bg-gray-50 items-center text-sm"
               >
-                <span className={`font-bold text-base ${entry.rank <= 3 ? "text-gray-900" : "text-gray-400"}`}>
+                <span className={`font-bold text-sm sm:text-base ${entry.rank <= 3 ? "text-gray-900" : "text-gray-400"}`}>
                   {entry.rank}
                 </span>
-                <span>
-                  <span className="font-semibold">{entry.name}</span>
-                  <br />
-                  <span className="text-xs text-gray-400">by @{entry.githubLogin}</span>
+                <span className="min-w-0 overflow-hidden">
+                  <span className="font-semibold truncate block">{entry.name}</span>
+                  <span className="text-xs text-gray-400 truncate block">@{entry.githubLogin}</span>
                 </span>
-                <span className="text-right font-semibold text-gray-900">
+                <span className="text-right font-semibold text-gray-900 whitespace-nowrap text-xs sm:text-sm">
                   ${entry.totalValue.toLocaleString("en-US", { maximumFractionDigits: 0 })}
                 </span>
-                <span className={`text-right font-semibold ${pnl >= 0 ? "text-green-600" : "text-red-600"}`}>
+                <span className={`text-right font-semibold whitespace-nowrap text-xs sm:text-sm ${pnl >= 0 ? "text-green-600" : "text-red-600"}`}>
                   {pnl >= 0 ? "+" : ""}${pnl.toLocaleString("en-US", { maximumFractionDigits: 0 })}
                 </span>
-                <span className="text-right text-gray-500 text-xs">
+                <span className="text-right text-gray-500 text-xs whitespace-nowrap">
                   {entry.tradeCount}
                 </span>
               </Link>
             );
           })}
-        </>
+        </div>
       ) : (
-        <>
-          <div className="grid grid-cols-[40px_1fr_90px_90px_80px_60px] px-4 py-2 text-xs uppercase text-gray-400 font-semibold border-b border-gray-200">
+        <div className="min-w-0">
+          <div className="grid grid-cols-[28px_1fr_auto_auto_auto_auto] gap-x-3 px-3 sm:px-4 py-2 text-xs uppercase text-gray-400 font-semibold border-b border-gray-200">
             <span>#</span>
             <span>Agent</span>
             <span className="text-right">Total</span>
-            <span className="text-right">Invested</span>
+            <span className="text-right hidden sm:block">Invested</span>
             <span className="text-right">P&L</span>
             <span className="text-right">Trades</span>
           </div>
@@ -88,32 +87,31 @@ export default function Leaderboard({ entries, arenaType }: LeaderboardProps) {
               <Link
                 key={entry.id}
                 href={`/agent/${entry.id}`}
-                className="grid grid-cols-[40px_1fr_90px_90px_80px_60px] px-4 py-3 border-b border-gray-50 hover:bg-gray-50 items-center text-sm"
+                className="grid grid-cols-[28px_1fr_auto_auto_auto_auto] gap-x-3 px-3 sm:px-4 py-3 border-b border-gray-50 hover:bg-gray-50 items-center text-sm"
               >
-                <span className={`font-bold text-base ${entry.rank <= 3 ? "text-gray-900" : "text-gray-400"}`}>
+                <span className={`font-bold text-sm sm:text-base ${entry.rank <= 3 ? "text-gray-900" : "text-gray-400"}`}>
                   {entry.rank}
                 </span>
-                <span>
-                  <span className="font-semibold">{entry.name}</span>
-                  <br />
-                  <span className="text-xs text-gray-400">by @{entry.githubLogin}</span>
+                <span className="min-w-0 overflow-hidden">
+                  <span className="font-semibold truncate block">{entry.name}</span>
+                  <span className="text-xs text-gray-400 truncate block">@{entry.githubLogin}</span>
                 </span>
-                <span className="text-right font-semibold text-gray-900">
+                <span className="text-right font-semibold text-gray-900 whitespace-nowrap text-xs sm:text-sm">
                   ${entry.totalValue.toLocaleString("en-US", { maximumFractionDigits: 0 })}
                 </span>
-                <span className="text-right text-gray-500 text-xs">
+                <span className="text-right text-gray-500 text-xs whitespace-nowrap hidden sm:block">
                   ${entry.invested.toLocaleString("en-US", { maximumFractionDigits: 0 })}
                 </span>
-                <span className={`text-right font-semibold ${pnl >= 0 ? "text-green-600" : "text-red-600"}`}>
+                <span className={`text-right font-semibold whitespace-nowrap text-xs sm:text-sm ${pnl >= 0 ? "text-green-600" : "text-red-600"}`}>
                   {pnl >= 0 ? "+" : ""}${pnl.toLocaleString("en-US", { maximumFractionDigits: 0 })}
                 </span>
-                <span className="text-right text-gray-500 text-xs">
+                <span className="text-right text-gray-500 text-xs whitespace-nowrap">
                   {entry.tradeCount.toLocaleString()}
                 </span>
               </Link>
             );
           })}
-        </>
+        </div>
       )}
     </div>
   );
