@@ -52,8 +52,10 @@ export default function Home() {
     async function fetchData() {
       try {
         const res = await fetch("/api/competition");
-        const json = await res.json();
-        setData(json);
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.competition) setData(json);
+        }
       } catch {
         // silently retry on next poll
       }
