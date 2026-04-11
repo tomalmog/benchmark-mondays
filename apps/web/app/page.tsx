@@ -7,7 +7,7 @@ import Leaderboard from "@/components/Leaderboard";
 import ActivityFeed from "@/components/ActivityFeed";
 import NavBar from "@/components/NavBar";
 import Link from "next/link";
-import snapshot from "../../public/snapshot.json";
+import snapshot from "../public/snapshot.json";
 
 const POLL_INTERVAL = 5000; // 5 seconds
 
